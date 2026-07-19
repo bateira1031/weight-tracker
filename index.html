@@ -8,7 +8,9 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="体重管理">
 <meta name="theme-color" content="#0f172a">
+<link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon-192.png">
+<link rel="icon" href="icon-192.png">
 <style>
   :root {
     color-scheme: light dark;
@@ -198,6 +200,57 @@
   .modal-row:last-child { border-bottom: none; }
   .modal-actions { display: flex; gap: 10px; margin-top: 16px; }
   .modal-actions button { flex: 1; }
+  .period-switch {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 10px;
+  }
+  .period-switch button {
+    flex: 1;
+    background: var(--bg);
+    color: var(--text-sub);
+    border: 1px solid var(--border);
+    padding: 8px 0;
+    font-size: 13px;
+  }
+  .period-switch button.active {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+  }
+  .chart-svg { width: 100%; height: auto; display: block; }
+  .chart-empty { color: var(--text-sub); font-size: 14px; text-align: center; padding: 24px 0; }
+  .chart-tooltip { font-size: 12px; color: var(--text-sub); text-align: center; min-height: 16px; margin-top: 4px; }
+  .stats-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  .stat-box .stat-value { font-size: 20px; font-weight: 700; }
+  .stat-box .stat-label { font-size: 12px; color: var(--text-sub); margin-top: 2px; }
+  .settings-field { margin-bottom: 14px; }
+  .settings-field label.field-label { margin-bottom: 6px; }
+  .day-multiplier-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 6px;
+  }
+  .day-multiplier-grid .dm-item { text-align: center; }
+  .day-multiplier-grid label { display: block; font-size: 11px; color: var(--text-sub); margin-bottom: 4px; }
+  .day-multiplier-grid input { padding: 8px 4px; text-align: center; font-size: 14px; }
+  textarea#import-textarea {
+    width: 100%;
+    min-height: 120px;
+    font-size: 14px;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: monospace;
+  }
+  .button-row { display: flex; gap: 10px; flex-wrap: wrap; }
+  .button-row button { flex: 1; min-width: 120px; }
 </style>
 </head>
 <body>
@@ -285,15 +338,106 @@
 
   <main class="tab" id="tab-chart" hidden>
     <h1>グラフ</h1>
+
     <div class="card">
-      <p style="color:var(--text-sub); font-size:14px;">グラフ機能は準備中です(マイルストーン3で実装)。</p>
+      <h2>体重</h2>
+      <div class="period-switch" id="weight-period-switch">
+        <button data-period="30" class="active">1ヶ月</button>
+        <button data-period="90">3ヶ月</button>
+        <button data-period="0">全期間</button>
+      </div>
+      <div id="weight-chart-container"></div>
+      <div class="chart-tooltip" id="weight-chart-tooltip"></div>
+    </div>
+
+    <div class="card">
+      <h2>TDEE推移(週次)</h2>
+      <div id="tdee-chart-container"></div>
+    </div>
+
+    <div class="card">
+      <h2>統計サマリ</h2>
+      <div class="stats-grid">
+        <div class="stat-box">
+          <div class="stat-value" id="stat-pace">--</div>
+          <div class="stat-label">直近4週の平均ペース</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-value" id="stat-eta">--</div>
+          <div class="stat-label">目標到達予測日</div>
+        </div>
+      </div>
     </div>
   </main>
 
   <main class="tab" id="tab-settings" hidden>
     <h1>設定</h1>
+
     <div class="card">
-      <p style="color:var(--text-sub); font-size:14px;">設定機能は準備中です(マイルストーン3で実装)。</p>
+      <h2>目標</h2>
+      <div class="settings-field">
+        <label class="field-label" for="cfg-goal-weight">目標体重 (kg)</label>
+        <input type="text" inputmode="decimal" id="cfg-goal-weight">
+      </div>
+      <div class="settings-field">
+        <label class="field-label" for="cfg-loss-rate">週次ペース (%)</label>
+        <input type="text" inputmode="decimal" id="cfg-loss-rate">
+      </div>
+      <div class="settings-field">
+        <label class="field-label" for="cfg-protein-per-kg">タンパク質 (g/kg)</label>
+        <input type="text" inputmode="decimal" id="cfg-protein-per-kg">
+      </div>
+      <div class="settings-field">
+        <label class="field-label" for="cfg-fat-ratio">脂質比率 (残カロリーに占める割合、0〜1)</label>
+        <input type="text" inputmode="decimal" id="cfg-fat-ratio">
+      </div>
+      <div class="settings-field">
+        <label class="field-label">曜日別配分倍率(週平均が概ね1.0になるように)</label>
+        <div class="day-multiplier-grid">
+          <div class="dm-item"><label for="cfg-dm-mon">月</label><input type="text" inputmode="decimal" id="cfg-dm-mon"></div>
+          <div class="dm-item"><label for="cfg-dm-tue">火</label><input type="text" inputmode="decimal" id="cfg-dm-tue"></div>
+          <div class="dm-item"><label for="cfg-dm-wed">水</label><input type="text" inputmode="decimal" id="cfg-dm-wed"></div>
+          <div class="dm-item"><label for="cfg-dm-thu">木</label><input type="text" inputmode="decimal" id="cfg-dm-thu"></div>
+          <div class="dm-item"><label for="cfg-dm-fri">金</label><input type="text" inputmode="decimal" id="cfg-dm-fri"></div>
+          <div class="dm-item"><label for="cfg-dm-sat">土</label><input type="text" inputmode="decimal" id="cfg-dm-sat"></div>
+          <div class="dm-item"><label for="cfg-dm-sun">日</label><input type="text" inputmode="decimal" id="cfg-dm-sun"></div>
+        </div>
+      </div>
+      <div class="row" style="justify-content:flex-end;">
+        <button id="cfg-save-btn" type="button">保存</button>
+      </div>
+      <div class="save-msg" id="cfg-saved-msg"></div>
+    </div>
+
+    <div class="card" id="backup-banner-card" hidden>
+      <div class="banner warn" id="backup-banner-text"></div>
+    </div>
+
+    <div class="card">
+      <h2>バックアップ</h2>
+      <p style="color:var(--text-sub); font-size:13px; margin-top:0;">全データ(設定・記録・週次計算結果)をJSONとして書き出します。</p>
+      <div class="button-row">
+        <button class="secondary" id="export-clipboard-btn" type="button">クリップボードにコピー</button>
+        <button class="secondary" id="export-download-btn" type="button">ファイルをダウンロード</button>
+      </div>
+      <div class="save-msg" id="export-msg"></div>
+    </div>
+
+    <div class="card">
+      <h2>復元(インポート)</h2>
+      <p style="color:var(--text-sub); font-size:13px; margin-top:0;">エクスポートしたJSONを貼り付けてください。既存データは上書きされます。</p>
+      <textarea id="import-textarea" placeholder="{&quot;wt_config&quot;: ...}"></textarea>
+      <div class="row" style="margin-top:10px; justify-content:flex-end;">
+        <button id="import-btn" type="button">インポート</button>
+      </div>
+      <div class="error-msg" id="import-error"></div>
+      <div class="save-msg" id="import-msg"></div>
+    </div>
+
+    <div class="card">
+      <h2>データ削除</h2>
+      <p style="color:var(--text-sub); font-size:13px; margin-top:0;">体重・摂取記録・週次計算結果・設定をすべて削除し、初期状態に戻します。</p>
+      <button class="danger" id="delete-all-btn" type="button">全データ削除</button>
     </div>
   </main>
 
@@ -511,6 +655,37 @@
     return { ...weeklyEntry, targetAvgKcal: manualTargetAvgKcal, targetByDay, targetMacros, overridden: true };
   }
 
+  // rows: {date, ...}[] 昇順。periodDaysが0/falsyなら全期間をそのまま返す
+  function filterRowsByPeriod(rows, periodDays, todayDateStr) {
+    if (!periodDays) return rows;
+    const cutoff = addDays(todayDateStr, -periodDays + 1);
+    return rows.filter(r => r.date >= cutoff);
+  }
+
+  // 直近4週の平均減量ペース(kg/週)と、現ペースでの目標到達予測日(設計書5.3節)
+  function calcStatsSummary(trendWeights, goalWeightKg, todayDateStr) {
+    if (trendWeights.length < 2) return { paceKgPerWeek: null, etaDate: null };
+
+    const latest = trendWeights[trendWeights.length - 1];
+    const cutoff = addDays(latest.date, -28);
+    let refPoint = trendWeights[0];
+    for (const t of trendWeights) {
+      if (t.date <= cutoff) refPoint = t;
+      else break;
+    }
+    const daysSpan = Math.max(1, daysBetween(refPoint.date, latest.date));
+    if (daysSpan < 7) return { paceKgPerWeek: null, etaDate: null };
+
+    const paceKgPerWeek = ((latest.trendWeightKg - refPoint.trendWeightKg) / daysSpan) * 7;
+
+    let etaDate = null;
+    if (paceKgPerWeek < -0.01 && latest.trendWeightKg > goalWeightKg) {
+      const weeksToGoal = (latest.trendWeightKg - goalWeightKg) / Math.abs(paceKgPerWeek);
+      etaDate = addDays(latest.date, Math.round(weeksToGoal * 7));
+    }
+    return { paceKgPerWeek, etaDate, refDate: refPoint.date, latestDate: latest.date };
+  }
+
   // ============================================================
   // ストレージ層
   // ============================================================
@@ -593,6 +768,19 @@
 
   const $ = (id) => document.getElementById(id);
 
+  const LAST_EXPORT_KEY = 'wt_last_export';
+  const BACKUP_REMINDER_DAYS = 30;
+
+  function daysSinceLastExport() {
+    const last = localStorage.getItem(LAST_EXPORT_KEY);
+    if (!last) return Infinity;
+    return daysBetween(last, todayStr());
+  }
+
+  function markExported() {
+    localStorage.setItem(LAST_EXPORT_KEY, todayStr());
+  }
+
   function showBanner() {
     const area = $('today-banner-area');
     area.innerHTML = '';
@@ -607,6 +795,25 @@
       b.className = 'banner';
       b.textContent = '目標体重に到達しました。維持モード(週次ペース0%)への切替を検討してください。設定タブから変更できます。';
       area.appendChild(b);
+    }
+    if (daysSinceLastExport() >= BACKUP_REMINDER_DAYS) {
+      const b = document.createElement('div');
+      b.className = 'banner warn';
+      b.textContent = 'バックアップ推奨: 設定タブからJSONエクスポートを行ってください。';
+      area.appendChild(b);
+    }
+  }
+
+  function renderBackupBanner() {
+    const days = daysSinceLastExport();
+    const card = $('backup-banner-card');
+    if (days >= BACKUP_REMINDER_DAYS) {
+      card.hidden = false;
+      $('backup-banner-text').textContent = Number.isFinite(days)
+        ? `最終バックアップから${days}日経過しています。エクスポートをおすすめします。`
+        : 'まだバックアップを取っていません。エクスポートをおすすめします。';
+    } else {
+      card.hidden = true;
     }
   }
 
@@ -787,6 +994,295 @@
     document.querySelectorAll('#tabbar button').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.tab === name);
     });
+    if (name === 'chart') renderChartTab();
+    if (name === 'settings') renderSettingsTab();
+  }
+
+  // ============================================================
+  // グラフタブ(SVG自作)
+  // ============================================================
+
+  let currentChartPeriod = 30;
+
+  function renderChartTab() {
+    renderWeightChart(currentChartPeriod);
+    renderTdeeChart();
+    renderStatsSummary();
+  }
+
+  function renderWeightChart(periodDays) {
+    const container = $('weight-chart-container');
+    $('weight-chart-tooltip').textContent = '';
+    const today = todayStr();
+    const trendWeights = calcTrendWeights(state.entries, state.config.emaAlpha);
+    const actualRows = state.entries
+      .filter(e => e.weightKg != null)
+      .map(e => ({ date: e.date, value: e.weightKg }));
+    const trendRows = trendWeights.map(t => ({ date: t.date, value: t.trendWeightKg }));
+
+    const filteredTrend = filterRowsByPeriod(trendRows, periodDays, today);
+    const filteredActual = filterRowsByPeriod(actualRows, periodDays, today);
+
+    if (filteredTrend.length === 0) {
+      container.innerHTML = '<div class="chart-empty">体重データがありません</div>';
+      return;
+    }
+
+    const minDate = filteredTrend[0].date;
+    const maxDate = filteredTrend[filteredTrend.length - 1].date;
+    const dateRange = Math.max(1, daysBetween(minDate, maxDate));
+
+    const goal = state.config.goalWeightKg;
+    const allValues = filteredTrend.map(r => r.value).concat(filteredActual.map(r => r.value)).concat([goal]);
+    let minV = Math.min(...allValues);
+    let maxV = Math.max(...allValues);
+    if (minV === maxV) { minV -= 1; maxV += 1; }
+    const pad = (maxV - minV) * 0.12;
+    minV -= pad;
+    maxV += pad;
+
+    const W = 320, H = 190, marginL = 32, marginR = 8, marginT = 12, marginB = 20;
+    const plotW = W - marginL - marginR;
+    const plotH = H - marginT - marginB;
+    const xOf = (dateStr) => marginL + (daysBetween(minDate, dateStr) / dateRange) * plotW;
+    const yOf = (v) => marginT + (1 - (v - minV) / (maxV - minV)) * plotH;
+
+    const trendPath = filteredTrend
+      .map((r, i) => `${i === 0 ? 'M' : 'L'} ${xOf(r.date).toFixed(1)} ${yOf(r.value).toFixed(1)}`)
+      .join(' ');
+    const actualDots = filteredActual
+      .map(r => `<circle cx="${xOf(r.date).toFixed(1)}" cy="${yOf(r.value).toFixed(1)}" r="2.3" fill="var(--text-sub)" opacity="0.6"></circle>`)
+      .join('');
+    const goalY = yOf(goal);
+    const goalLine = (goal >= minV && goal <= maxV)
+      ? `<line x1="${marginL}" y1="${goalY.toFixed(1)}" x2="${W - marginR}" y2="${goalY.toFixed(1)}" stroke="var(--success)" stroke-width="1" stroke-dasharray="4 3"></line>`
+      : '';
+
+    const dMin = parseDateStr(minDate), dMax = parseDateStr(maxDate);
+    const xMinLabel = `${dMin.getMonth() + 1}/${dMin.getDate()}`;
+    const xMaxLabel = `${dMax.getMonth() + 1}/${dMax.getDate()}`;
+
+    container.innerHTML = `
+      <svg class="chart-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">
+        ${goalLine}
+        ${actualDots}
+        <path d="${trendPath}" fill="none" stroke="var(--accent)" stroke-width="2"></path>
+        <text x="2" y="${marginT + 8}" font-size="9" fill="var(--text-sub)">${maxV.toFixed(1)}</text>
+        <text x="2" y="${H - marginB + 4}" font-size="9" fill="var(--text-sub)">${minV.toFixed(1)}</text>
+        <text x="${marginL}" y="${H - 4}" font-size="9" fill="var(--text-sub)" text-anchor="start">${xMinLabel}</text>
+        <text x="${W - marginR}" y="${H - 4}" font-size="9" fill="var(--text-sub)" text-anchor="end">${xMaxLabel}</text>
+        <rect x="${marginL}" y="${marginT}" width="${plotW}" height="${plotH}" fill="transparent" id="weight-chart-hit"></rect>
+      </svg>
+    `;
+
+    const svgEl = container.querySelector('svg');
+    svgEl.addEventListener('click', (evt) => {
+      const rect = svgEl.getBoundingClientRect();
+      const xPix = (evt.clientX - rect.left) * (W / rect.width);
+      const ratio = clamp((xPix - marginL) / plotW, 0, 1);
+      const targetDate = addDays(minDate, Math.round(ratio * dateRange));
+      let closest = filteredTrend[0];
+      let bestDiff = Infinity;
+      for (const r of filteredTrend) {
+        const diff = Math.abs(daysBetween(r.date, targetDate));
+        if (diff < bestDiff) { bestDiff = diff; closest = r; }
+      }
+      $('weight-chart-tooltip').textContent = `${closest.date}: トレンド ${closest.value.toFixed(1)} kg`;
+    });
+  }
+
+  function renderTdeeChart() {
+    const container = $('tdee-chart-container');
+    const weekly = state.weekly.slice().sort((a, b) => (a.weekStart < b.weekStart ? -1 : 1)).slice(-12);
+    if (weekly.length === 0) {
+      container.innerHTML = '<div class="chart-empty">週次データがありません</div>';
+      return;
+    }
+
+    const W = 320, H = 150, marginL = 32, marginR = 8, marginT = 12, marginB = 20;
+    const plotW = W - marginL - marginR;
+    const plotH = H - marginT - marginB;
+    const values = weekly.map(w => w.estimatedTdee);
+    let minV = Math.min(...values);
+    let maxV = Math.max(...values);
+    if (minV === maxV) { minV -= 100; maxV += 100; }
+    const pad = (maxV - minV) * 0.15;
+    minV = Math.max(0, minV - pad);
+    maxV += pad;
+
+    const slot = plotW / weekly.length;
+    const barW = slot * 0.6;
+    const bars = weekly.map((w, i) => {
+      const cx = marginL + slot * i + slot / 2;
+      const y = marginT + (1 - (w.estimatedTdee - minV) / (maxV - minV)) * plotH;
+      const barH = (marginT + plotH) - y;
+      return `<rect x="${(cx - barW / 2).toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(0, barH).toFixed(1)}" rx="2" fill="var(--accent)"></rect>`;
+    }).join('');
+
+    const dFirst = parseDateStr(weekly[0].weekStart);
+    const dLast = parseDateStr(weekly[weekly.length - 1].weekStart);
+
+    container.innerHTML = `
+      <svg class="chart-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">
+        ${bars}
+        <text x="2" y="${marginT + 8}" font-size="9" fill="var(--text-sub)">${Math.round(maxV)}</text>
+        <text x="2" y="${H - marginB + 4}" font-size="9" fill="var(--text-sub)">${Math.round(minV)}</text>
+        <text x="${marginL}" y="${H - 4}" font-size="9" fill="var(--text-sub)" text-anchor="start">${dFirst.getMonth() + 1}/${dFirst.getDate()}</text>
+        <text x="${W - marginR}" y="${H - 4}" font-size="9" fill="var(--text-sub)" text-anchor="end">${dLast.getMonth() + 1}/${dLast.getDate()}</text>
+      </svg>
+    `;
+  }
+
+  function renderStatsSummary() {
+    const trendWeights = calcTrendWeights(state.entries, state.config.emaAlpha);
+    const stats = calcStatsSummary(trendWeights, state.config.goalWeightKg, todayStr());
+    if (stats.paceKgPerWeek == null) {
+      $('stat-pace').textContent = '--';
+      $('stat-eta').textContent = '--';
+      return;
+    }
+    const pace = Math.round(stats.paceKgPerWeek * 100) / 100;
+    $('stat-pace').textContent = `${pace > 0 ? '+' : ''}${pace.toFixed(2)} kg/週`;
+    if (stats.etaDate) {
+      const d = parseDateStr(stats.etaDate);
+      $('stat-eta').textContent = `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`;
+    } else {
+      $('stat-eta').textContent = '予測不可';
+    }
+  }
+
+  // ============================================================
+  // 設定タブ
+  // ============================================================
+
+  function renderSettingsTab() {
+    const c = state.config;
+    $('cfg-goal-weight').value = c.goalWeightKg;
+    $('cfg-loss-rate').value = c.weeklyLossRatePct;
+    $('cfg-protein-per-kg').value = c.proteinPerKg;
+    $('cfg-fat-ratio').value = c.fatRatio;
+    for (const d of DAY_KEYS) $(`cfg-dm-${d}`).value = c.dayMultipliers[d];
+    renderBackupBanner();
+  }
+
+  function handleConfigSave() {
+    const msgEl = $('cfg-saved-msg');
+    msgEl.textContent = '';
+
+    const goalWeightKg = parseFloat($('cfg-goal-weight').value);
+    const weeklyLossRatePct = parseFloat($('cfg-loss-rate').value);
+    const proteinPerKg = parseFloat($('cfg-protein-per-kg').value);
+    const fatRatio = parseFloat($('cfg-fat-ratio').value);
+    if ([goalWeightKg, weeklyLossRatePct, proteinPerKg, fatRatio].some(v => isNaN(v))) {
+      alert('数値を正しく入力してください。');
+      return;
+    }
+
+    const dayMultipliers = {};
+    for (const d of DAY_KEYS) {
+      const v = parseFloat($(`cfg-dm-${d}`).value);
+      if (isNaN(v) || v <= 0) {
+        alert('曜日別配分は正の数で入力してください。');
+        return;
+      }
+      dayMultipliers[d] = v;
+    }
+
+    state.config = { ...state.config, goalWeightKg, weeklyLossRatePct, proteinPerKg, fatRatio, dayMultipliers };
+    saveConfig(state.config);
+    msgEl.textContent = '保存しました。次回の週次見直しから反映されます(今週の目標は「目標を手動調整」で即時変更できます)。';
+    renderTodayTab();
+  }
+
+  function buildBackupPayload() {
+    return { wt_config: state.config, wt_entries: state.entries, wt_weekly: state.weekly };
+  }
+
+  async function handleExportClipboard() {
+    const json = JSON.stringify(buildBackupPayload(), null, 2);
+    const msgEl = $('export-msg');
+    try {
+      await navigator.clipboard.writeText(json);
+      msgEl.textContent = 'クリップボードにコピーしました。';
+    } catch (e) {
+      msgEl.textContent = 'コピーに失敗しました。ファイルダウンロードをご利用ください。';
+    }
+    markExported();
+    renderBackupBanner();
+  }
+
+  function handleExportDownload() {
+    const json = JSON.stringify(buildBackupPayload(), null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `weight-tracker-backup-${todayStr().replace(/-/g, '')}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    $('export-msg').textContent = 'ファイルをダウンロードしました。';
+    markExported();
+    renderBackupBanner();
+  }
+
+  function validateBackupPayload(obj) {
+    return !!obj && typeof obj === 'object'
+      && obj.wt_config && typeof obj.wt_config === 'object'
+      && Array.isArray(obj.wt_entries)
+      && Array.isArray(obj.wt_weekly);
+  }
+
+  function handleImport() {
+    const raw = $('import-textarea').value.trim();
+    const errEl = $('import-error');
+    const msgEl = $('import-msg');
+    errEl.textContent = '';
+    msgEl.textContent = '';
+
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (e) {
+      errEl.textContent = 'JSONの形式が正しくありません。';
+      return;
+    }
+    if (!validateBackupPayload(parsed)) {
+      errEl.textContent = 'バックアップデータの形式が正しくありません(wt_config/wt_entries/wt_weeklyが必要です)。';
+      return;
+    }
+    if (!confirm('現在のデータを上書きしてインポートします。よろしいですか?')) {
+      return;
+    }
+
+    state.config = {
+      ...DEFAULT_CONFIG,
+      ...parsed.wt_config,
+      dayMultipliers: { ...DEFAULT_CONFIG.dayMultipliers, ...(parsed.wt_config.dayMultipliers || {}) }
+    };
+    state.entries = parsed.wt_entries.slice().sort((a, b) => (a.date < b.date ? -1 : 1));
+    state.weekly = parsed.wt_weekly.slice().sort((a, b) => (a.weekStart < b.weekStart ? -1 : 1));
+    saveConfig(state.config);
+    saveEntries(state.entries);
+    saveWeekly(state.weekly);
+
+    $('import-textarea').value = '';
+    msgEl.textContent = '復元しました。';
+    ensureCurrentWeekPlan();
+    renderTodayTab();
+    renderSettingsTab();
+    renderChartTab();
+  }
+
+  function handleDeleteAll() {
+    if (!confirm('本当にすべてのデータを削除しますか？この操作は取り消せません。')) return;
+    if (!confirm('最終確認: 体重・摂取記録・週次計算結果・設定がすべて削除されます。実行しますか？')) return;
+    localStorage.removeItem(STORAGE_KEYS.config);
+    localStorage.removeItem(STORAGE_KEYS.entries);
+    localStorage.removeItem(STORAGE_KEYS.weekly);
+    localStorage.removeItem(LAST_EXPORT_KEY);
+    location.reload();
   }
 
   function flushPendingWeeklyModal() {
@@ -837,6 +1333,26 @@
     $('override-save-btn').addEventListener('click', handleOverrideSave);
     $('override-reset-btn').addEventListener('click', handleOverrideReset);
 
+    document.querySelectorAll('#weight-period-switch button').forEach(btn => {
+      btn.addEventListener('click', () => {
+        currentChartPeriod = parseInt(btn.dataset.period, 10);
+        document.querySelectorAll('#weight-period-switch button').forEach(b => b.classList.toggle('active', b === btn));
+        renderWeightChart(currentChartPeriod);
+      });
+    });
+
+    $('cfg-save-btn').addEventListener('click', handleConfigSave);
+    $('export-clipboard-btn').addEventListener('click', handleExportClipboard);
+    $('export-download-btn').addEventListener('click', handleExportDownload);
+    $('import-btn').addEventListener('click', handleImport);
+    $('delete-all-btn').addEventListener('click', handleDeleteAll);
+
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('sw.js').catch((e) => console.warn('SW registration failed', e));
+      });
+    }
+
     ensureCurrentWeekPlan();
     renderTodayTab();
     flushPendingWeeklyModal();
@@ -881,6 +1397,7 @@
   window.wtAlgo = {
     calcTrendWeights, estimateTdee, calcTargets, calcMacros, calcMacrosForKcal,
     computeEstimate, computeWeeklyPlan, applyManualOverride,
+    filterRowsByPeriod, calcStatsSummary,
     getWeekStart, dayOfWeekKey, addDays, daysBetween, todayStr
   };
 
