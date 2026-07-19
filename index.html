@@ -1,0 +1,733 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<title>体重管理</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="体重管理">
+<meta name="theme-color" content="#0f172a">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f5f6f8;
+    --card-bg: #ffffff;
+    --text: #1a1d23;
+    --text-sub: #6b7280;
+    --accent: #2563eb;
+    --accent-sub: #dbeafe;
+    --danger: #dc2626;
+    --border: #e5e7eb;
+    --success: #16a34a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #101317;
+      --card-bg: #1a1e24;
+      --text: #f0f1f3;
+      --text-sub: #9aa2ad;
+      --accent: #5b9dff;
+      --accent-sub: #1e3a5f;
+      --danger: #f87171;
+      --border: #2a2f37;
+      --success: #4ade80;
+    }
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    touch-action: manipulation;
+  }
+  #app {
+    max-width: 480px;
+    margin: 0 auto;
+    min-height: 100vh;
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: calc(64px + env(safe-area-inset-bottom));
+    display: flex;
+    flex-direction: column;
+  }
+  main.tab {
+    flex: 1;
+    padding: 16px 16px 24px;
+  }
+  main.tab[hidden] { display: none; }
+  h1 { font-size: 20px; margin: 4px 0 16px; }
+  h2 { font-size: 15px; margin: 0 0 10px; color: var(--text-sub); font-weight: 600; }
+  .banner {
+    background: var(--accent-sub);
+    color: var(--text);
+    padding: 10px 14px;
+    border-radius: 10px;
+    font-size: 13px;
+    margin-bottom: 14px;
+  }
+  .banner.warn { background: #fee2e2; color: #991b1b; }
+  @media (prefers-color-scheme: dark) {
+    .banner.warn { background: #4c1d1d; color: #fca5a5; }
+  }
+  .card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 16px;
+    margin-bottom: 14px;
+  }
+  .target-kcal {
+    font-size: 40px;
+    font-weight: 700;
+    line-height: 1.1;
+  }
+  .target-macros {
+    color: var(--text-sub);
+    font-size: 14px;
+    margin-top: 6px;
+  }
+  .row { display: flex; gap: 8px; align-items: center; }
+  .row + .row { margin-top: 10px; }
+  label.field-label {
+    font-size: 12px;
+    color: var(--text-sub);
+    display: block;
+    margin-bottom: 4px;
+  }
+  input[type=text], input[type=number] {
+    width: 100%;
+    font-size: 16px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg);
+    color: var(--text);
+  }
+  .field { flex: 1; min-width: 0; }
+  .field-narrow { flex: 0 0 76px; }
+  button {
+    font-size: 15px;
+    font-weight: 600;
+    padding: 10px 16px;
+    border-radius: 10px;
+    border: none;
+    background: var(--accent);
+    color: #fff;
+    cursor: pointer;
+  }
+  button.secondary {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text);
+  }
+  button.danger { background: var(--danger); }
+  button:active { opacity: 0.75; }
+  .pfc-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  .trend-line {
+    font-size: 13px;
+    color: var(--text-sub);
+    margin-top: 6px;
+  }
+  .remaining-box {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+  }
+  .remaining-box .value { font-size: 22px; font-weight: 700; }
+  .remaining-box .sub { font-size: 12px; color: var(--text-sub); }
+  nav#tabbar {
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    max-width: 480px;
+    margin: 0 auto;
+    display: flex;
+    background: var(--card-bg);
+    border-top: 1px solid var(--border);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  nav#tabbar button {
+    flex: 1;
+    background: none;
+    color: var(--text-sub);
+    border-radius: 0;
+    padding: 12px 0 10px;
+    font-size: 12px;
+    font-weight: 500;
+  }
+  nav#tabbar button.active { color: var(--accent); font-weight: 700; }
+  .save-msg {
+    font-size: 12px;
+    color: var(--success);
+    margin-top: 6px;
+    min-height: 16px;
+  }
+  .error-msg {
+    font-size: 12px;
+    color: var(--danger);
+    margin-top: 6px;
+    min-height: 16px;
+  }
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    z-index: 100;
+  }
+  .modal-overlay[hidden] { display: none; }
+  .modal {
+    background: var(--card-bg);
+    border-radius: 16px;
+    padding: 20px;
+    max-width: 400px;
+    width: 100%;
+  }
+  .modal h3 { margin-top: 0; }
+  .modal-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
+  .modal-row:last-child { border-bottom: none; }
+  .modal-actions { display: flex; gap: 10px; margin-top: 16px; }
+  .modal-actions button { flex: 1; }
+</style>
+</head>
+<body>
+<div id="app">
+  <main class="tab" id="tab-today">
+    <div id="today-banner-area"></div>
+    <h1 id="today-date-heading">-</h1>
+
+    <div class="card">
+      <h2>今日の目標</h2>
+      <div id="today-target-body">
+        <div class="target-kcal" id="today-target-kcal">--</div>
+        <div class="target-macros" id="today-target-macros">-</div>
+      </div>
+      <div class="trend-line" id="today-trend-line"></div>
+    </div>
+
+    <div class="card">
+      <h2>今週の残り</h2>
+      <div class="remaining-box">
+        <div>
+          <div class="value" id="remaining-per-day">--</div>
+          <div class="sub" id="remaining-detail">データ不足</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>体重入力</h2>
+      <div class="row">
+        <div class="field">
+          <label class="field-label" for="weight-input">体重 (kg)</label>
+          <input type="text" inputmode="decimal" id="weight-input" placeholder="78.6">
+        </div>
+        <button id="weight-save-btn">保存</button>
+      </div>
+      <div class="error-msg" id="weight-error"></div>
+      <div class="save-msg" id="weight-saved-msg"></div>
+    </div>
+
+    <div class="card">
+      <h2>摂取記録(Claude算出値)</h2>
+      <div class="pfc-grid">
+        <div class="field">
+          <label class="field-label" for="intake-kcal-input">kcal</label>
+          <input type="text" inputmode="numeric" id="intake-kcal-input" placeholder="1850">
+        </div>
+        <div class="field">
+          <label class="field-label" for="intake-protein-input">P (g)</label>
+          <input type="text" inputmode="numeric" id="intake-protein-input" placeholder="130">
+        </div>
+        <div class="field">
+          <label class="field-label" for="intake-fat-input">F (g)</label>
+          <input type="text" inputmode="numeric" id="intake-fat-input" placeholder="58">
+        </div>
+        <div class="field">
+          <label class="field-label" for="intake-carb-input">C (g)</label>
+          <input type="text" inputmode="numeric" id="intake-carb-input" placeholder="195">
+        </div>
+      </div>
+      <div class="row" style="margin-top:10px; justify-content:flex-end;">
+        <button id="intake-save-btn">保存</button>
+      </div>
+      <div class="error-msg" id="intake-error"></div>
+      <div class="save-msg" id="intake-saved-msg"></div>
+      <div class="trend-line">※あすけんスクショをClaudeチャットに渡して算出した値を転記</div>
+    </div>
+  </main>
+
+  <main class="tab" id="tab-chart" hidden>
+    <h1>グラフ</h1>
+    <div class="card">
+      <p style="color:var(--text-sub); font-size:14px;">グラフ機能は準備中です(マイルストーン3で実装)。</p>
+    </div>
+  </main>
+
+  <main class="tab" id="tab-settings" hidden>
+    <h1>設定</h1>
+    <div class="card">
+      <p style="color:var(--text-sub); font-size:14px;">設定機能は準備中です(マイルストーン3で実装)。</p>
+    </div>
+  </main>
+
+  <nav id="tabbar">
+    <button data-tab="today" class="active">今日</button>
+    <button data-tab="chart">グラフ</button>
+    <button data-tab="settings">設定</button>
+  </nav>
+</div>
+
+<div class="modal-overlay" id="weekly-modal" hidden>
+  <div class="modal">
+    <h3>週次見直し</h3>
+    <div id="weekly-modal-body"></div>
+    <div class="modal-actions">
+      <button class="secondary" id="weekly-modal-close">閉じる</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  'use strict';
+
+  // ============================================================
+  // アルゴリズム層(純粋関数、DOM非依存)
+  // ============================================================
+
+  const DEFAULT_CONFIG = {
+    heightCm: 171,
+    goalWeightKg: 73.0,
+    weeklyLossRatePct: 0.43,
+    proteinPerKg: 1.7,
+    fatRatio: 0.30,
+    kcalPerKgFat: 7200,
+    dayMultipliers: { mon: 0.95, tue: 0.95, wed: 0.95, thu: 0.95, fri: 0.95, sat: 1.113, sun: 1.113 },
+    emaAlpha: 0.1,
+    tdeeWindowDays: 21,
+    initialTdee: 2324
+  };
+
+  const DAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+  const DAY_LABELS_JA = { sun: '日', mon: '月', tue: '火', wed: '水', thu: '木', fri: '金', sat: '土' };
+
+  function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, v)); }
+
+  function todayStr(d) {
+    d = d || new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+
+  function parseDateStr(s) {
+    const [y, m, d] = s.split('-').map(Number);
+    return new Date(y, m - 1, d);
+  }
+
+  function addDays(dateStr, n) {
+    const d = parseDateStr(dateStr);
+    d.setDate(d.getDate() + n);
+    return todayStr(d);
+  }
+
+  function daysBetween(dateStrA, dateStrB) {
+    const a = parseDateStr(dateStrA).getTime();
+    const b = parseDateStr(dateStrB).getTime();
+    return Math.round((b - a) / 86400000);
+  }
+
+  function dayOfWeekKey(dateStr) {
+    return DAY_KEYS[parseDateStr(dateStr).getDay()];
+  }
+
+  function getWeekStart(dateStr) {
+    // 週の起点は月曜(ローカルタイム)
+    const d = parseDateStr(dateStr);
+    const dow = d.getDay(); // 0=sun..6=sat
+    const diffToMonday = dow === 0 ? -6 : 1 - dow;
+    d.setDate(d.getDate() + diffToMonday);
+    return todayStr(d);
+  }
+
+  // entries: [{date, weightKg, ...}] 昇順。weightKg==nullの日はスキップ(前回trend保持)
+  // 戻り値: [{date, trendWeightKg}] (最初の体重記録以降のみ)
+  function calcTrendWeights(entries, alpha) {
+    const result = [];
+    let trend = null;
+    for (const e of entries) {
+      if (e.weightKg == null) {
+        if (trend != null) result.push({ date: e.date, trendWeightKg: trend });
+        continue;
+      }
+      trend = (trend == null) ? e.weightKg : trend + alpha * (e.weightKg - trend);
+      result.push({ date: e.date, trendWeightKg: trend });
+    }
+    return result;
+  }
+
+  function trendMapFrom(trendWeights) {
+    const map = {};
+    for (const t of trendWeights) map[t.date] = t.trendWeightKg;
+    return map;
+  }
+
+  // TDEE推定(設計書4.2節)
+  // entries: 対象ウィンドウ内の日次レコード(昇順)
+  // trendMap: date -> trendWeightKg
+  // prevTdee: 直前の推定値(nullなら initialTdee を使用)
+  function estimateTdee(entries, trendMap, config, prevTdee) {
+    const valid = entries.filter(e => e.weightKg != null && e.intakeKcal != null && trendMap[e.date] != null);
+    const prev = (prevTdee != null) ? prevTdee : config.initialTdee;
+
+    if (valid.length < 10) {
+      return { tdee: prev, recordedDays: valid.length, guarded: true, reason: 'insufficient-data' };
+    }
+
+    const avgIntake = valid.reduce((s, e) => s + e.intakeKcal, 0) / valid.length;
+    const first = valid[0];
+    const last = valid[valid.length - 1];
+    const trendStart = trendMap[first.date];
+    const trendEnd = trendMap[last.date];
+    const periodDays = Math.max(1, daysBetween(first.date, last.date));
+    const deltaTrend = trendEnd - trendStart;
+
+    let est = avgIntake - (deltaTrend * config.kcalPerKgFat / periodDays);
+
+    // ガード: 週次変動を±150kcalにクランプ
+    est = clamp(est, prev - 150, prev + 150);
+    // ガード: 絶対範囲1600〜3200にクランプ
+    est = clamp(est, 1600, 3200);
+
+    return { tdee: Math.round(est), recordedDays: valid.length, guarded: false, avgIntake, deltaTrend, periodDays };
+  }
+
+  // 目標摂取カロリー算出(設計書4.3節)
+  function calcTargets(trendWeightKg, estimatedTdee, config) {
+    const weeklyDeficitKcal = trendWeightKg * (config.weeklyLossRatePct / 100) * config.kcalPerKgFat;
+    let targetAvgKcal = estimatedTdee - weeklyDeficitKcal / 7;
+    targetAvgKcal = Math.max(1500, targetAvgKcal);
+
+    const targetByDay = {};
+    for (const d of DAY_KEYS) {
+      targetByDay[d] = Math.round(targetAvgKcal * config.dayMultipliers[d] / 5) * 5;
+    }
+
+    return { weeklyDeficitKcal, targetAvgKcal, targetByDay };
+  }
+
+  // PFC配分(設計書4.4節)
+  function calcMacros(trendWeightKg, targetByDay, config) {
+    const proteinG = Math.round(trendWeightKg * config.proteinPerKg);
+    const proteinKcal = proteinG * 4;
+    const macrosByDay = {};
+    for (const d of DAY_KEYS) {
+      const remainKcal = targetByDay[d] - proteinKcal;
+      const fatG = Math.round(remainKcal * config.fatRatio / 9);
+      const carbG = Math.round((remainKcal - fatG * 9) / 4);
+      macrosByDay[d] = { proteinG, fatG, carbG };
+    }
+    return macrosByDay;
+  }
+
+  // ============================================================
+  // ストレージ層
+  // ============================================================
+
+  const STORAGE_KEYS = { config: 'wt_config', entries: 'wt_entries', weekly: 'wt_weekly' };
+  let storageCorrupted = false;
+
+  function loadJSON(key, fallback) {
+    const raw = localStorage.getItem(key);
+    if (raw == null) return fallback;
+    try {
+      return JSON.parse(raw);
+    } catch (e) {
+      console.warn('localStorage corrupted for key', key, e);
+      storageCorrupted = true;
+      return fallback;
+    }
+  }
+
+  function saveJSON(key, value) {
+    localStorage.setItem(key, JSON.stringify(value));
+  }
+
+  function loadConfig() {
+    const cfg = loadJSON(STORAGE_KEYS.config, null);
+    if (cfg == null) {
+      saveJSON(STORAGE_KEYS.config, DEFAULT_CONFIG);
+      return { ...DEFAULT_CONFIG };
+    }
+    return { ...DEFAULT_CONFIG, ...cfg, dayMultipliers: { ...DEFAULT_CONFIG.dayMultipliers, ...(cfg.dayMultipliers || {}) } };
+  }
+
+  function loadEntries() {
+    const entries = loadJSON(STORAGE_KEYS.entries, []);
+    if (!Array.isArray(entries)) return [];
+    entries.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+    return entries;
+  }
+
+  function loadWeekly() {
+    const weekly = loadJSON(STORAGE_KEYS.weekly, []);
+    return Array.isArray(weekly) ? weekly : [];
+  }
+
+  function saveConfig(cfg) { saveJSON(STORAGE_KEYS.config, cfg); }
+  function saveEntries(entries) { saveJSON(STORAGE_KEYS.entries, entries); }
+  function saveWeekly(weekly) { saveJSON(STORAGE_KEYS.weekly, weekly); }
+
+  function upsertEntry(entries, date, patch) {
+    const idx = entries.findIndex(e => e.date === date);
+    if (idx === -1) {
+      const base = { date, weightKg: null, intakeKcal: null, proteinG: null, fatG: null, carbG: null, note: '' };
+      entries.push({ ...base, ...patch });
+      entries.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+    } else {
+      entries[idx] = { ...entries[idx], ...patch };
+    }
+    return entries;
+  }
+
+  function getEntry(entries, date) {
+    return entries.find(e => e.date === date) || null;
+  }
+
+  // ============================================================
+  // アプリ状態
+  // ============================================================
+
+  const state = {
+    config: loadConfig(),
+    entries: loadEntries(),
+  };
+
+  // ============================================================
+  // UI層
+  // ============================================================
+
+  const $ = (id) => document.getElementById(id);
+
+  function showBanner() {
+    const area = $('today-banner-area');
+    area.innerHTML = '';
+    if (storageCorrupted) {
+      const b = document.createElement('div');
+      b.className = 'banner warn';
+      b.textContent = '保存データの一部が壊れていたため初期化しました。';
+      area.appendChild(b);
+    }
+  }
+
+  function computeTodayContext() {
+    const today = todayStr();
+    const trendWeights = calcTrendWeights(state.entries, state.config.emaAlpha);
+    const trendMap = trendMapFrom(trendWeights);
+    const latestTrend = trendWeights.length ? trendWeights[trendWeights.length - 1].trendWeightKg : null;
+
+    let targets = null;
+    let macros = null;
+    let tdeeResult = null;
+
+    if (latestTrend != null) {
+      const windowStart = addDays(today, -state.config.tdeeWindowDays + 1);
+      const windowEntries = state.entries.filter(e => e.date >= windowStart && e.date <= today);
+      tdeeResult = estimateTdee(windowEntries, trendMap, state.config, null);
+      targets = calcTargets(latestTrend, tdeeResult.tdee, state.config);
+      macros = calcMacros(latestTrend, targets.targetByDay, state.config);
+    }
+
+    return { today, trendWeights, trendMap, latestTrend, targets, macros, tdeeResult };
+  }
+
+  function renderTodayTab() {
+    const ctx = computeTodayContext();
+    const dow = dayOfWeekKey(ctx.today);
+    const d = parseDateStr(ctx.today);
+    $('today-date-heading').textContent = `${d.getMonth() + 1}/${d.getDate()}(${DAY_LABELS_JA[dow]})`;
+
+    if (ctx.targets && ctx.macros) {
+      const kcal = ctx.targets.targetByDay[dow];
+      const m = ctx.macros[dow];
+      $('today-target-kcal').textContent = `${kcal} kcal`;
+      $('today-target-macros').textContent = `P ${m.proteinG}g / F ${m.fatG}g / C ${m.carbG}g`;
+      const guardNote = ctx.tdeeResult.guarded ? '(データ不足のため初期値を使用中)' : '';
+      $('today-trend-line').textContent = `トレンド体重 ${ctx.latestTrend.toFixed(1)} kg ${guardNote}`;
+    } else {
+      $('today-target-kcal').textContent = '--';
+      $('today-target-macros').textContent = '体重を入力すると目標が表示されます';
+      $('today-trend-line').textContent = '';
+    }
+
+    renderRemaining(ctx);
+
+    const todayEntry = getEntry(state.entries, ctx.today);
+    $('weight-input').value = (todayEntry && todayEntry.weightKg != null) ? todayEntry.weightKg : '';
+    $('intake-kcal-input').value = (todayEntry && todayEntry.intakeKcal != null) ? todayEntry.intakeKcal : '';
+    $('intake-protein-input').value = (todayEntry && todayEntry.proteinG != null) ? todayEntry.proteinG : '';
+    $('intake-fat-input').value = (todayEntry && todayEntry.fatG != null) ? todayEntry.fatG : '';
+    $('intake-carb-input').value = (todayEntry && todayEntry.carbG != null) ? todayEntry.carbG : '';
+
+    showBanner();
+  }
+
+  function renderRemaining(ctx) {
+    // M1時点では簡易表示のみ(週次集計はM2で実装)
+    if (!ctx.targets) {
+      $('remaining-per-day').textContent = '--';
+      $('remaining-detail').textContent = 'データ不足';
+      return;
+    }
+    const weekStart = getWeekStart(ctx.today);
+    const weekDates = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
+    let totalTarget = 0;
+    let totalIntake = 0;
+    let remainingDays = 0;
+    for (const date of weekDates) {
+      const dow = dayOfWeekKey(date);
+      totalTarget += ctx.targets.targetByDay[dow];
+      const e = getEntry(state.entries, date);
+      if (e && e.intakeKcal != null) totalIntake += e.intakeKcal;
+      if (date >= ctx.today) remainingDays++;
+    }
+    const remainingKcal = totalTarget - totalIntake;
+    const perDay = remainingDays > 0 ? Math.round(remainingKcal / remainingDays) : remainingKcal;
+    $('remaining-per-day').textContent = `1日あたり ${perDay.toLocaleString()} kcal`;
+    $('remaining-detail').textContent = `あと${remainingDays}日 / 残り${remainingKcal.toLocaleString()}kcal`;
+  }
+
+  function handleWeightSave() {
+    const raw = $('weight-input').value.trim();
+    const errEl = $('weight-error');
+    const msgEl = $('weight-saved-msg');
+    errEl.textContent = '';
+    msgEl.textContent = '';
+
+    const val = parseFloat(raw);
+    if (raw === '' || isNaN(val)) {
+      errEl.textContent = '体重を入力してください。';
+      return;
+    }
+    if (val < 40 || val > 150) {
+      errEl.textContent = '体重は40〜150kgの範囲で入力してください。';
+      return;
+    }
+
+    const today = todayStr();
+    upsertEntry(state.entries, today, { weightKg: val });
+    saveEntries(state.entries);
+    msgEl.textContent = '保存しました。';
+    renderTodayTab();
+  }
+
+  function handleIntakeSave() {
+    const kcalRaw = $('intake-kcal-input').value.trim();
+    const pRaw = $('intake-protein-input').value.trim();
+    const fRaw = $('intake-fat-input').value.trim();
+    const cRaw = $('intake-carb-input').value.trim();
+    const errEl = $('intake-error');
+    const msgEl = $('intake-saved-msg');
+    errEl.textContent = '';
+    msgEl.textContent = '';
+
+    const kcal = parseFloat(kcalRaw);
+    if (kcalRaw === '' || isNaN(kcal)) {
+      errEl.textContent = 'kcalを入力してください。';
+      return;
+    }
+
+    const doSave = () => {
+      const today = todayStr();
+      const patch = { intakeKcal: Math.round(kcal) };
+      if (pRaw !== '') patch.proteinG = Math.round(parseFloat(pRaw));
+      if (fRaw !== '') patch.fatG = Math.round(parseFloat(fRaw));
+      if (cRaw !== '') patch.carbG = Math.round(parseFloat(cRaw));
+      upsertEntry(state.entries, today, patch);
+      saveEntries(state.entries);
+      msgEl.textContent = '保存しました。';
+      renderTodayTab();
+    };
+
+    if (kcal < 500 || kcal > 5000) {
+      if (confirm(`kcalが${kcal}です。500〜5000の通常範囲外ですが保存しますか？`)) {
+        doSave();
+      } else {
+        errEl.textContent = '保存をキャンセルしました。';
+      }
+      return;
+    }
+    doSave();
+  }
+
+  function switchTab(name) {
+    for (const tab of ['today', 'chart', 'settings']) {
+      $(`tab-${tab}`).hidden = (tab !== name);
+    }
+    document.querySelectorAll('#tabbar button').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.tab === name);
+    });
+  }
+
+  function init() {
+    $('weight-save-btn').addEventListener('click', handleWeightSave);
+    $('intake-save-btn').addEventListener('click', handleIntakeSave);
+    document.querySelectorAll('#tabbar button').forEach(btn => {
+      btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+    });
+    $('weekly-modal-close').addEventListener('click', () => { $('weekly-modal').hidden = true; });
+
+    renderTodayTab();
+  }
+
+  // 開発用テストデータ投入(コンソールから wtDevSeed() で実行)
+  window.wtDevSeed = function (days = 21) {
+    const today = todayStr();
+    const entries = [];
+    let w = 79.0;
+    for (let i = days - 1; i >= 0; i--) {
+      const date = addDays(today, -i);
+      w -= 0.03 + Math.random() * 0.02;
+      const intake = Math.round(1850 + (Math.random() * 200 - 100));
+      entries.push({
+        date,
+        weightKg: Math.round(w * 10) / 10,
+        intakeKcal: intake,
+        proteinG: Math.round(intake * 0.25 / 4),
+        fatG: Math.round(intake * 0.3 / 9),
+        carbG: Math.round(intake * 0.45 / 4),
+        note: ''
+      });
+    }
+    state.entries = entries;
+    saveEntries(entries);
+    renderTodayTab();
+    console.log(`Seeded ${days} days of test data.`);
+  };
+
+  window.wtDevClear = function () {
+    localStorage.removeItem(STORAGE_KEYS.entries);
+    localStorage.removeItem(STORAGE_KEYS.weekly);
+    location.reload();
+  };
+
+  // テスト用にアルゴリズム関数をエクスポート
+  window.wtAlgo = { calcTrendWeights, estimateTdee, calcTargets, calcMacros, getWeekStart, dayOfWeekKey, addDays, daysBetween, todayStr };
+
+  init();
+})();
+</script>
+</body>
+</html>
