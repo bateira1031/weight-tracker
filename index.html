@@ -213,6 +213,22 @@
         <div class="target-macros" id="today-target-macros">-</div>
       </div>
       <div class="trend-line" id="today-trend-line"></div>
+      <div class="row" style="margin-top:10px;">
+        <button class="secondary" id="override-toggle-btn" type="button" hidden>目標を手動調整</button>
+        <button class="secondary" id="override-reset-btn" type="button" hidden>自動計算に戻す</button>
+      </div>
+      <div id="override-form" hidden style="margin-top:10px;">
+        <div class="row">
+          <div class="field">
+            <label class="field-label" for="override-kcal-input">週の目標平均kcal</label>
+            <input type="text" inputmode="numeric" id="override-kcal-input">
+          </div>
+          <button id="override-save-btn" type="button">適用</button>
+        </div>
+        <div class="row">
+          <button class="secondary" id="override-cancel-btn" type="button">キャンセル</button>
+        </div>
+      </div>
     </div>
 
     <div class="card">
@@ -428,18 +444,71 @@
     return { weeklyDeficitKcal, targetAvgKcal, targetByDay };
   }
 
-  // PFC配分(設計書4.4節)
-  function calcMacros(trendWeightKg, targetByDay, config) {
+  // PFC配分(設計書4.4節)。proteinGは全曜日固定、残りはfatRatioで脂質・炭水化物に配分
+  function calcMacrosForKcal(trendWeightKg, kcal, config) {
     const proteinG = Math.round(trendWeightKg * config.proteinPerKg);
     const proteinKcal = proteinG * 4;
+    const remainKcal = kcal - proteinKcal;
+    const fatG = Math.round(remainKcal * config.fatRatio / 9);
+    const carbG = Math.round((remainKcal - fatG * 9) / 4);
+    return { proteinG, fatG, carbG };
+  }
+
+  function calcMacros(trendWeightKg, targetByDay, config) {
     const macrosByDay = {};
     for (const d of DAY_KEYS) {
-      const remainKcal = targetByDay[d] - proteinKcal;
-      const fatG = Math.round(remainKcal * config.fatRatio / 9);
-      const carbG = Math.round((remainKcal - fatG * 9) / 4);
-      macrosByDay[d] = { proteinG, fatG, carbG };
+      macrosByDay[d] = calcMacrosForKcal(trendWeightKg, targetByDay[d], config);
     }
     return macrosByDay;
+  }
+
+  // トレンド体重・TDEE推定・目標・PFCを一括算出(M1の「今日」タブ即時計算、M2の週次計算の両方で使用)
+  function computeEstimate(entries, config, todayDateStr, prevTdee) {
+    const trendWeights = calcTrendWeights(entries, config.emaAlpha);
+    const trendMap = trendMapFrom(trendWeights);
+    const latestTrend = trendWeights.length ? trendWeights[trendWeights.length - 1].trendWeightKg : null;
+    if (latestTrend == null) {
+      return { trendWeights, trendMap, latestTrend: null, tdeeResult: null, targets: null, macrosByDay: null };
+    }
+    const windowStart = addDays(todayDateStr, -config.tdeeWindowDays + 1);
+    const windowEntries = entries.filter(e => e.date >= windowStart && e.date <= todayDateStr);
+    const tdeeResult = estimateTdee(windowEntries, trendMap, config, prevTdee);
+    const targets = calcTargets(latestTrend, tdeeResult.tdee, config);
+    const macrosByDay = calcMacros(latestTrend, targets.targetByDay, config);
+    return { trendWeights, trendMap, latestTrend, tdeeResult, targets, macrosByDay };
+  }
+
+  // 週次プラン算出(設計書4.5節)。prevEntryがあれば前週のestimatedTdeeを引き継ぎクランプの基準にする
+  function computeWeeklyPlan(entries, config, todayDateStr, prevEntry) {
+    const weekStart = getWeekStart(todayDateStr);
+    const prevTdee = prevEntry ? prevEntry.estimatedTdee : null;
+    const est = computeEstimate(entries, config, todayDateStr, prevTdee);
+    if (est.latestTrend == null) return null;
+
+    const targetAvgKcal = Math.round(est.targets.targetAvgKcal);
+    const targetMacros = calcMacrosForKcal(est.latestTrend, targetAvgKcal, config);
+
+    return {
+      weekStart,
+      estimatedTdee: est.tdeeResult.tdee,
+      targetAvgKcal,
+      targetByDay: est.targets.targetByDay,
+      trendWeightKg: est.latestTrend,
+      targetMacros,
+      tdeeGuarded: est.tdeeResult.guarded,
+      tdeeRecordedDays: est.tdeeResult.recordedDays,
+      overridden: false
+    };
+  }
+
+  // ユーザーによる目標の手動上書き(オーバーライドフラグを保持)
+  function applyManualOverride(weeklyEntry, manualTargetAvgKcal, config) {
+    const targetByDay = {};
+    for (const d of DAY_KEYS) {
+      targetByDay[d] = Math.round(manualTargetAvgKcal * config.dayMultipliers[d] / 5) * 5;
+    }
+    const targetMacros = calcMacrosForKcal(weeklyEntry.trendWeightKg, manualTargetAvgKcal, config);
+    return { ...weeklyEntry, targetAvgKcal: manualTargetAvgKcal, targetByDay, targetMacros, overridden: true };
   }
 
   // ============================================================
@@ -513,7 +582,10 @@
   const state = {
     config: loadConfig(),
     entries: loadEntries(),
+    weekly: loadWeekly(),
+    currentWeekPlan: null,
   };
+  let pendingWeeklyModal = null;
 
   // ============================================================
   // UI層
@@ -530,51 +602,86 @@
       b.textContent = '保存データの一部が壊れていたため初期化しました。';
       area.appendChild(b);
     }
+    if (state.currentWeekPlan && state.currentWeekPlan.trendWeightKg <= state.config.goalWeightKg) {
+      const b = document.createElement('div');
+      b.className = 'banner';
+      b.textContent = '目標体重に到達しました。維持モード(週次ペース0%)への切替を検討してください。設定タブから変更できます。';
+      area.appendChild(b);
+    }
   }
 
-  function computeTodayContext() {
+  // 当該週(state.currentWeekPlan.weekStart)分のwt_weeklyキャッシュを用意する。
+  // 未計算なら新規算出してキャッシュし、前週データがあれば週次サマリモーダルを予約する。
+  function ensureCurrentWeekPlan() {
     const today = todayStr();
-    const trendWeights = calcTrendWeights(state.entries, state.config.emaAlpha);
-    const trendMap = trendMapFrom(trendWeights);
-    const latestTrend = trendWeights.length ? trendWeights[trendWeights.length - 1].trendWeightKg : null;
-
-    let targets = null;
-    let macros = null;
-    let tdeeResult = null;
-
-    if (latestTrend != null) {
-      const windowStart = addDays(today, -state.config.tdeeWindowDays + 1);
-      const windowEntries = state.entries.filter(e => e.date >= windowStart && e.date <= today);
-      tdeeResult = estimateTdee(windowEntries, trendMap, state.config, null);
-      targets = calcTargets(latestTrend, tdeeResult.tdee, state.config);
-      macros = calcMacros(latestTrend, targets.targetByDay, state.config);
+    const weekStart = getWeekStart(today);
+    const existing = state.weekly.find(w => w.weekStart === weekStart);
+    if (existing) {
+      state.currentWeekPlan = existing;
+      return;
     }
 
-    return { today, trendWeights, trendMap, latestTrend, targets, macros, tdeeResult };
+    const prevWeekStart = addDays(weekStart, -7);
+    const prevEntry = state.weekly.find(w => w.weekStart === prevWeekStart) || null;
+    const newEntry = computeWeeklyPlan(state.entries, state.config, today, prevEntry);
+    if (!newEntry) {
+      state.currentWeekPlan = null;
+      return;
+    }
+
+    state.weekly.push(newEntry);
+    state.weekly.sort((a, b) => (a.weekStart < b.weekStart ? -1 : 1));
+    saveWeekly(state.weekly);
+    state.currentWeekPlan = newEntry;
+
+    if (prevEntry) {
+      pendingWeeklyModal = { newEntry, prevEntry };
+    }
+  }
+
+  function showWeeklyModal(newEntry, prevEntry) {
+    const sign = (n) => (n > 0 ? '+' : '') + n;
+    const tdeeDiff = newEntry.estimatedTdee - prevEntry.estimatedTdee;
+    const kcalDiff = newEntry.targetAvgKcal - prevEntry.targetAvgKcal;
+    const trendDiff = Math.round((newEntry.trendWeightKg - prevEntry.trendWeightKg) * 10) / 10;
+    $('weekly-modal-body').innerHTML = `
+      <div class="modal-row"><span>推定TDEE</span><span>${prevEntry.estimatedTdee} → ${newEntry.estimatedTdee} kcal (${sign(tdeeDiff)})</span></div>
+      <div class="modal-row"><span>目標kcal(平均)</span><span>${prevEntry.targetAvgKcal} → ${newEntry.targetAvgKcal} kcal (${sign(kcalDiff)})</span></div>
+      <div class="modal-row"><span>トレンド体重</span><span>${prevEntry.trendWeightKg.toFixed(1)} → ${newEntry.trendWeightKg.toFixed(1)} kg (${sign(trendDiff)})</span></div>
+    `;
+    $('weekly-modal').hidden = false;
   }
 
   function renderTodayTab() {
-    const ctx = computeTodayContext();
-    const dow = dayOfWeekKey(ctx.today);
-    const d = parseDateStr(ctx.today);
+    const today = todayStr();
+    const dow = dayOfWeekKey(today);
+    const d = parseDateStr(today);
     $('today-date-heading').textContent = `${d.getMonth() + 1}/${d.getDate()}(${DAY_LABELS_JA[dow]})`;
 
-    if (ctx.targets && ctx.macros) {
-      const kcal = ctx.targets.targetByDay[dow];
-      const m = ctx.macros[dow];
+    const plan = state.currentWeekPlan;
+    if (plan) {
+      const kcal = plan.targetByDay[dow];
+      const macrosByDay = calcMacros(plan.trendWeightKg, plan.targetByDay, state.config);
+      const m = macrosByDay[dow];
       $('today-target-kcal').textContent = `${kcal} kcal`;
       $('today-target-macros').textContent = `P ${m.proteinG}g / F ${m.fatG}g / C ${m.carbG}g`;
-      const guardNote = ctx.tdeeResult.guarded ? '(データ不足のため初期値を使用中)' : '';
-      $('today-trend-line').textContent = `トレンド体重 ${ctx.latestTrend.toFixed(1)} kg ${guardNote}`;
+      const guardNote = plan.tdeeGuarded ? '(データ不足のため初期値を使用中)' : '';
+      const overrideNote = plan.overridden ? '(手動調整中)' : '';
+      $('today-trend-line').textContent = `トレンド体重 ${plan.trendWeightKg.toFixed(1)} kg ${guardNote}${overrideNote}`;
+      $('override-toggle-btn').hidden = false;
+      $('override-kcal-input').value = plan.targetAvgKcal;
+      $('override-reset-btn').hidden = !plan.overridden;
     } else {
       $('today-target-kcal').textContent = '--';
       $('today-target-macros').textContent = '体重を入力すると目標が表示されます';
       $('today-trend-line').textContent = '';
+      $('override-toggle-btn').hidden = true;
+      $('override-form').hidden = true;
     }
 
-    renderRemaining(ctx);
+    renderRemaining(plan, today);
 
-    const todayEntry = getEntry(state.entries, ctx.today);
+    const todayEntry = getEntry(state.entries, today);
     $('weight-input').value = (todayEntry && todayEntry.weightKg != null) ? todayEntry.weightKg : '';
     $('intake-kcal-input').value = (todayEntry && todayEntry.intakeKcal != null) ? todayEntry.intakeKcal : '';
     $('intake-protein-input').value = (todayEntry && todayEntry.proteinG != null) ? todayEntry.proteinG : '';
@@ -584,24 +691,23 @@
     showBanner();
   }
 
-  function renderRemaining(ctx) {
-    // M1時点では簡易表示のみ(週次集計はM2で実装)
-    if (!ctx.targets) {
+  // 週の目標合計(週次キャッシュのtargetByDay、週内固定)−実績合計を残日数で割って1日あたり可処分カロリーを算出
+  function renderRemaining(plan, today) {
+    if (!plan) {
       $('remaining-per-day').textContent = '--';
       $('remaining-detail').textContent = 'データ不足';
       return;
     }
-    const weekStart = getWeekStart(ctx.today);
-    const weekDates = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
+    const weekDates = Array.from({ length: 7 }, (_, i) => addDays(plan.weekStart, i));
     let totalTarget = 0;
     let totalIntake = 0;
     let remainingDays = 0;
     for (const date of weekDates) {
       const dow = dayOfWeekKey(date);
-      totalTarget += ctx.targets.targetByDay[dow];
+      totalTarget += plan.targetByDay[dow];
       const e = getEntry(state.entries, date);
       if (e && e.intakeKcal != null) totalIntake += e.intakeKcal;
-      if (date >= ctx.today) remainingDays++;
+      if (date >= today) remainingDays++;
     }
     const remainingKcal = totalTarget - totalIntake;
     const perDay = remainingDays > 0 ? Math.round(remainingKcal / remainingDays) : remainingKcal;
@@ -630,7 +736,9 @@
     upsertEntry(state.entries, today, { weightKg: val });
     saveEntries(state.entries);
     msgEl.textContent = '保存しました。';
+    ensureCurrentWeekPlan();
     renderTodayTab();
+    flushPendingWeeklyModal();
   }
 
   function handleIntakeSave() {
@@ -681,6 +789,40 @@
     });
   }
 
+  function flushPendingWeeklyModal() {
+    if (pendingWeeklyModal) {
+      showWeeklyModal(pendingWeeklyModal.newEntry, pendingWeeklyModal.prevEntry);
+      pendingWeeklyModal = null;
+    }
+  }
+
+  function handleOverrideSave() {
+    const val = parseInt($('override-kcal-input').value, 10);
+    if (isNaN(val) || val < 1000 || val > 5000) {
+      alert('週の目標平均kcalは1000〜5000の範囲で入力してください。');
+      return;
+    }
+    const idx = state.weekly.findIndex(w => w.weekStart === state.currentWeekPlan.weekStart);
+    const updated = applyManualOverride(state.currentWeekPlan, val, state.config);
+    state.weekly[idx] = updated;
+    state.currentWeekPlan = updated;
+    saveWeekly(state.weekly);
+    $('override-form').hidden = true;
+    renderTodayTab();
+  }
+
+  function handleOverrideReset() {
+    const idx = state.weekly.findIndex(w => w.weekStart === state.currentWeekPlan.weekStart);
+    const prevWeekStart = addDays(state.currentWeekPlan.weekStart, -7);
+    const prevEntry = state.weekly.find(w => w.weekStart === prevWeekStart) || null;
+    const recomputed = computeWeeklyPlan(state.entries, state.config, todayStr(), prevEntry);
+    state.weekly[idx] = recomputed;
+    state.currentWeekPlan = recomputed;
+    saveWeekly(state.weekly);
+    $('override-form').hidden = true;
+    renderTodayTab();
+  }
+
   function init() {
     $('weight-save-btn').addEventListener('click', handleWeightSave);
     $('intake-save-btn').addEventListener('click', handleIntakeSave);
@@ -688,8 +830,16 @@
       btn.addEventListener('click', () => switchTab(btn.dataset.tab));
     });
     $('weekly-modal-close').addEventListener('click', () => { $('weekly-modal').hidden = true; });
+    $('override-toggle-btn').addEventListener('click', () => {
+      $('override-form').hidden = !$('override-form').hidden;
+    });
+    $('override-cancel-btn').addEventListener('click', () => { $('override-form').hidden = true; });
+    $('override-save-btn').addEventListener('click', handleOverrideSave);
+    $('override-reset-btn').addEventListener('click', handleOverrideReset);
 
+    ensureCurrentWeekPlan();
     renderTodayTab();
+    flushPendingWeeklyModal();
   }
 
   // 開発用テストデータ投入(コンソールから wtDevSeed() で実行)
@@ -713,7 +863,11 @@
     }
     state.entries = entries;
     saveEntries(entries);
+    state.weekly = [];
+    saveWeekly(state.weekly);
+    ensureCurrentWeekPlan();
     renderTodayTab();
+    flushPendingWeeklyModal();
     console.log(`Seeded ${days} days of test data.`);
   };
 
@@ -724,7 +878,11 @@
   };
 
   // テスト用にアルゴリズム関数をエクスポート
-  window.wtAlgo = { calcTrendWeights, estimateTdee, calcTargets, calcMacros, getWeekStart, dayOfWeekKey, addDays, daysBetween, todayStr };
+  window.wtAlgo = {
+    calcTrendWeights, estimateTdee, calcTargets, calcMacros, calcMacrosForKcal,
+    computeEstimate, computeWeeklyPlan, applyManualOverride,
+    getWeekStart, dayOfWeekKey, addDays, daysBetween, todayStr
+  };
 
   init();
 })();
